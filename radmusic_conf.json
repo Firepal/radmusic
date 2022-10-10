@@ -1,0 +1,27 @@
+{
+    "nuke_wavs_for_flac": false,
+    "copy_aux_files": true,
+
+    "search_exts": [".flac"],
+
+    "targets": 
+    [
+        {
+            "_comment": "_diskdestroyer keyword means 'target this very directory and remove after encode'",
+            "name": "_diskdestroyer",
+            "opts": "",
+            "search_exts": [".flac"],
+            "file_ext": ".wav"
+        },
+        {
+            "name": "UMC_opuslight",
+            "opts": "-b:a 96k",
+            "file_ext": "opus"
+        },
+        {
+            "name": "UMC_mp3",
+            "opts": "-b:a 192k",
+            "file_ext": "mp3"
+        }
+    ]
+}
