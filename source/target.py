@@ -73,15 +73,6 @@ def convert_queue_serial(target,enc_queue):
         current = enc_queue.pop()
         convert_file_serial(current[0],current[1],target["opts"])
 
-def get_max_parallel_encodes(config,target):
-    iterator = [config,target]
-    max_parallel_encodes = 1
-    for conf in iterator:
-        if "max_parallel_encodes" in conf:
-            max_parallel_encodes = conf["max_parallel_encodes"]
-
-    return min(max(max_parallel_encodes,1),12)
-
 def get_key_or_none(a,b,key):
     iterator = [a,b]
     value = None
@@ -91,7 +82,6 @@ def get_key_or_none(a,b,key):
             break
 
     return value
-
 
 def process_targets(dir, all_files, config):
     copy_counter = [0,0]
@@ -156,8 +146,6 @@ def process_targets(dir, all_files, config):
 
             in_name = os.path.join(dir,file)
 
-            # This is slow and occurs on every target...
-            # only way to ensure we aren't re-encoding uselessly though.
             if not os.path.exists(out_name):
                 enc_queue.append((in_name,out_name))
                 encode_counter += 1
@@ -180,7 +168,7 @@ def process_targets(dir, all_files, config):
                 print("If you have more than 2 cores and the codec is sufficiently simple,")
                 print("you can enable parallel encoding by setting \"max_parallel_encodes\" to a value greater than 1.")
                 print("\n")
-                print("You can disable this message by adding the following line to the beginning of your umc.yaml file: \"quiet\":true")
+                print("You can disable this message by setting \"quiet\" to true.")
                 print(end='\n')
                 time.sleep(5)
             
