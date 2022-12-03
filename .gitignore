@@ -1,0 +1,8 @@
+build/
+dist/
+source/__pycache__/
+
+*.manifest
+*.spec
+*.yaml
+*.json
