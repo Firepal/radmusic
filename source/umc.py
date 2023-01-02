@@ -1,3 +1,4 @@
+import argparse
 import os
 import time
 from threading import Thread
@@ -38,15 +39,36 @@ def check_for_wavs(all_files):
     if del_prompt.lower()[0] == "y":
         fget.delete_files(files)
 
-def program(cwd,config):
+def init_argparse() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        usage="umc [OPTION] [CONFIG]"
+    )
+    parser.add_argument("-v","--version",action="version",
+        version=f"{parser.prog} v0.1")
+    parser.add_argument("-w","--wizard",action='store_true',
+        help="shows configuration wizard")
+    parser.add_argument("-q","--quiet",action='store_true',
+        help="makes program less chatty")
+    parser.add_argument('config_file',nargs="?")
+    return parser
+
+def program(cwd, args):
+    config = conf.init_config(cwd)
+    
+    if (config == None or args.wizard):
+        config = confwiz.wizard(cwd)
+
+    if config == None:
+        return
+    
+    if args.quiet:
+        config["quiet"] = True
+
     print("Doing one-time file discovery...")
     all_files = fget.get_all_files(cwd)
     print(str(len(all_files)) + " file(s)")
 
     if config["wav2flac"]:
-        print("would destroy")
-        # silent_wav2flac(cwd)
-    else:
         check_for_wavs(cwd)
 
     c_start = time.time()
@@ -56,14 +78,14 @@ def program(cwd,config):
     print("Time elapsed: " + str(round(c_end-c_start)) + " seconds")
 
 def main():
+    parser = init_argparse()
+    args = parser.parse_args()
     cwd = os.getcwd()
-
-    config = conf.init_config(cwd)
+    if args.config_file:
+        cwd = os.path.abspath(args.config_file)
+        if os.path.isfile(cwd):
+            cwd = os.path.split(cwd)[0]
     
-    if config == None:
-        config = confwiz.wizard(cwd)
-
-    if config != None:
-        program(cwd,config)
+    program(cwd,args)
 
     input("Press Enter to quit...")

@@ -1,29 +1,35 @@
 import os
 import yaml
+from . import misc
 
 conf_names = ["umc.yaml",".umc.yaml"]
 
-def init_config(dir):
-    cf = None
-    for name in conf_names:
-        file = os.path.join(dir,name)
-
-        try:
-            cf = open(file,"r")
-        except OSError:
-            pass
-        else:
-            break
-    if cf == None:
-        print("No known config file found.")
-        print()
+def get_dict_from_yaml(file):
+    try:
+        cf = open(file,"r")
+    except OSError:
         return None
     
     try:
         config = yaml.load(cf.read(),yaml.Loader)
     except:
-        print("Couldn't decode JSON in file " + file)
-        quit(1)
+        print("Couldn't decode " + file)
+        return None
+    
+    return config
+
+def init_config(dir):
+    file = None
+    for name in conf_names:
+        file = os.path.join(dir,name)
+        if os.path.exists(file): break
+    
+    if file == None:
+        print("No config file found.")
+        return None
+    
+    config = get_dict_from_yaml(file)
+    print(config)
 
     if config["targets"] == None:
         print("No targets.")
@@ -36,13 +42,8 @@ conf_defaults = {
     "copy_aux_files": True,
 }
 
-def populate_with_defaults(config):
-    for key in conf_defaults.keys():
-        if not (key in config):
-            config[key] = conf_defaults[key]
-
 def create_conf_file(config):
-    populate_with_defaults(config)
+    misc.extend_dict(config,conf_defaults)
 
     fname = conf_names[0]
     file = open(fname,'w')
