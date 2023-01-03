@@ -46,6 +46,11 @@ def filter_ext(all_files,ext_array,exclude = False):
 
 def copy_aux_files(all_files,exts,src,dst,count):
     files = filter_ext(all_files,exts,exclude=True)
+
+    for e in files[:]:
+        if os.path.basename(e) in [".umc.yaml","umc.yaml",".umc_override"]:
+            print("Not transferring", e)
+            files.remove(e)
     
     for file in files:
         sf = os.path.abspath(os.path.join(src,file))

@@ -39,7 +39,7 @@ def get_percent_string(cur_len,orig_len,outfile):
 def get_file_string(outfile):
     return "Encoded " + outfile + "\n"
 
-def convert_queue_parallel(target,enc_queue,opts):
+def convert_queue_parallel(target,enc_queue):
     orig_len = len(enc_queue)
     if ("preexisting_files" in target):
         orig_len += target["preexisting_files"]
@@ -72,13 +72,13 @@ def convert_queue_parallel(target,enc_queue,opts):
             continue
 
         enc = enc_queue.pop()
-        proc = convert_file_parallel(enc[0],enc[1],opts)
-        proc_queue.append((proc,enc[0],enc[1],opts))
+        proc = convert_file_parallel(enc[0],enc[1],enc[2])
+        proc_queue.append((proc,enc[0],enc[1],enc[2]))
 
-def convert_queue_serial(target,enc_queue,opts):
+def convert_queue_serial(target,enc_queue):
     while len(enc_queue) > 0:
-        current = enc_queue.pop()
-        convert_file_serial(current[0],current[1],opts)
+        enc = enc_queue.pop()
+        convert_file_serial(enc[0],enc[1],enc[2])
 
 def get_key_or_none(key, iterator):
     value = None
@@ -97,12 +97,9 @@ def apply_opts_params(target,vars):
         t_varname = re.sub(r'[{}]', '', v_str)
         if t_varname in vars:
             t_var = vars[t_varname]
-            # print(t_varname, "is", t_var, "in config")
+            print(t_varname, "is", t_var, "in config")
             opts = opts.replace(str(v_str),str(t_var))
     return opts
-
-def process_targets(src_dir, all_files, config):
-    process_targets_true(src_dir, all_files, config)
 
 # returns 2-tuple, where:
 # 0 = files affected by default config
@@ -127,86 +124,71 @@ def get_overriden_files(all_files,config):
                 files_overriden.append(file)
         print(override_file)
         overrides.append((override_file,files_overriden))
-    if len(overrides) == 0:
-        return None
+    
+    if len(overrides) == 0: return None
 
     return (all_files_trim,overrides)
 
-def get_files_to_process(src_dir,target,config,all_files,override):
+def get_files_to_process(src_dir,target,config,tcrit,all_files,override):
     to_process = []
     
-    to_process.append((
-        apply_opts_params(target,config["vars"]),
-        all_files if override == None else override[0]
-    ))
+    init = (target["opts"],all_files)
+    if override != None:
+        init = (apply_opts_params(target,config["vars"]),override[0])
+
+    to_process.append(init)
 
     if override != None:
         for overrides in override[1]:
             ov_file = os.path.join(src_dir,overrides[0])
 
             ov = conf.get_dict_from_yaml(ov_file)
+
             if ov == None:
                 print(ov_file, "didn't read properly, falling back to default parameters...")
-                ov = to_process[0][0]
+                ov = config["vars"]
+            misc.extend_dict(ov,config["vars"])
+
             print(ov)
+            
             new_opts = apply_opts_params(target,ov)
             print(new_opts)
 
             to_process.append((
                 new_opts,
-                overrides[1]))
+                overrides[1]
+            ))
     
-    
+    for i in range(len(to_process)):
+        arr = to_process[i]
+        yes = fget.filter_ext(arr[1],tcrit)
 
+        to_process[i] = (arr[0],yes)
+    
     return to_process
 
-def process_targets_selftest(src_dir, all_files, config):
-    override = get_overriden_files(all_files,config)
-    print()
-    if override != None:
-        if not "vars" in config:
-            print("Tried to use .umc_override where no variables exist on the default config!")
-            quit(1)
-        for overrides in override[1]:
-            print(overrides)
-            print()
+def create_queue(src_dir, t_dir, target: dict, to_process: list):
+    enc_queue = []
     
-    for target_key in config["targets"].keys():
-        target = config["targets"][target_key]
-        print()
-        print(target["opts"])
-        
-        to_process = []
-        
-        to_process.append((
-            apply_opts_params(target,config["vars"]),
-            all_files if override == None else override[0]
-        ))
+    for opts, files in to_process:
+        for file in files:
+            out_name = os.path.splitext(
+                os.path.join(t_dir,file)
+            )[0] + target["file_ext"]
 
-        if override != None:
-            for overrides in override[1]:
-                ov_file = os.path.join(src_dir,overrides[0])
+            in_name = os.path.join(src_dir,file)
 
-                ov = conf.get_dict_from_yaml(ov_file)
-                if ov == None:
-                    print(ov_file, "didn't read properly, falling back to default parameters...")
-                    ov = to_process[0][0]
-                print(ov)
-                new_opts = apply_opts_params(target,ov)
-                print(new_opts)
+            if os.path.exists(out_name):
+                if not ("preexisting_files" in target):
+                    target["preexisting_files"] = 0
+                target["preexisting_files"] += 1
+            else:
+                enc_queue.append((in_name,out_name,opts))
+    
+    return enc_queue
 
-                to_process.append((
-                    new_opts,
-                    overrides[1]))
-        
-
-
-        print()
-
-
-def process_targets_true(src_dir, all_files, config):
+def process_targets(src_dir, all_files, config):
     copy_counter = [0,0]
-    encode_counter = 0
     
     print()
 
@@ -225,6 +207,16 @@ def process_targets_true(src_dir, all_files, config):
     target_dir = os.path.join(src_dir, os.path.pardir)
     if ("target_dir" in config):
         target_dir = config["target_dir"]
+    
+    override = get_overriden_files(all_files,config)
+    
+    if override != None:
+        if not "vars" in config:
+            print("Tried to use .umc_override where no variables exist on the default config!")
+            quit(1)
+        for overrides in override[1]:
+            print(overrides)
+            print()
 
     enc_queue = []
     for target_key in config["targets"].keys():
@@ -251,38 +243,18 @@ def process_targets_true(src_dir, all_files, config):
             print("No file conversion filtering criteria (set \"convert_exts\" on config and/or target, e.g [\".wav\",\".flac\"])")
             return
 
-        print("Filtering files for conversion according to target criteria: " + str(tcrit))
+        print("Filtering files for conversion according to target criteria:", str(tcrit))
         
-        conv = fget.filter_ext(all_files,tcrit,False)
+        to_process = get_files_to_process(src_dir,target,config,tcrit,all_files,override)
 
         fget.copy_dirtree(src_dir,t_dir)
 
         if config["copy_aux_files"] == True:
             fget.copy_aux_files(all_files,tcrit,src_dir,t_dir,copy_counter)
         
+        enc_queue += create_queue(src_dir,t_dir,target,to_process)
 
-        for file in conv:
-            out_name = os.path.splitext(
-                os.path.join(t_dir,file)
-            )[0] + target["file_ext"]
-
-            in_name = os.path.join(src_dir,file)
-
-            if os.path.exists(out_name):
-                if not quiet:
-                    st = os.path.basename(out_name) + " already exists"
-                    st = misc.fit_in_one_line(st)
-                    print(end='\r'+misc.empty_column()+'\r')
-                    print(st,end='',flush=True)
-
-                if not ("preexisting_files" in target):
-                    target["preexisting_files"] = 0
-                target["preexisting_files"] += 1
-            else:
-                enc_queue.append((in_name,out_name))
-                encode_counter += 1
         print()
-        print("\n")
         
         if len(enc_queue) < 1:
             continue
@@ -290,10 +262,10 @@ def process_targets_true(src_dir, all_files, config):
         if parallel_encs > 1:
             if not quiet:
                 print("Encoding in parallel with", parallel_encs, "threads")
-            convert_queue_parallel(target,enc_queue,opts)
+            convert_queue_parallel(target,enc_queue)
         else:
             if not quiet:
-                print("****Encodes will occur serially (one-at-a-time).****")
+                print("****Encodes will occur serially (one at a time)****")
                 print("This is intended for weak computers or codecs that use many resources.")
                 print("If you have RAM to spare, more than 2 CPU cores and the codec is simple,")
                 print("try enabling parallel encodes by setting \"max_parallel_encodes\" to an integer greater than 1.")
@@ -302,10 +274,10 @@ def process_targets_true(src_dir, all_files, config):
                 print()
                 time.sleep(5)
             
-            convert_queue_serial(target,enc_queue,opts)
+            convert_queue_serial(target,enc_queue)
 
     
     print()
     print("Transcode/mirror successful. Phew!")
     print(str(copy_counter[0]) + " file(s) copied. " + str(copy_counter[1]) + " file(s) skipped.")
-    print(str(encode_counter) + " file(s) transcoded.")
+    print(str(len(enc_queue)) + " file(s) transcoded.")

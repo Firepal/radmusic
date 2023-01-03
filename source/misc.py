@@ -16,7 +16,7 @@ def empty_column():
     columns, lines = os.get_terminal_size()
     return ' ' * (columns-1)
 
-def extend_dict(A,B):
-    for key in B.keys():
-        if not key in A:
-            A[key] = B[key]
+def extend_dict(AA : dict,BB : dict):
+    for key in BB.keys():
+        if not key in AA:
+            AA[key] = BB[key]
