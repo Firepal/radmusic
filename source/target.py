@@ -55,8 +55,11 @@ def convert_queue_parallel(target,enc_queue):
                 print(str(infile))
                 print(str(outfile))
                 print("One of your encodes did not succeed!")
-                print(get_command(infile,outfile,proc_opts))
-                os.remove(outfile)
+
+
+                print(" ".join(get_command(infile,outfile,proc_opts)))
+                if os.path.exists(outfile):
+                    os.remove(outfile)
                 print("------------")
                 return
             sys.stdout.flush()
@@ -89,18 +92,6 @@ def get_key_or_none(key, iterator):
 
     return value
 
-def apply_opts_params(target,vars):
-    t_vars = re.findall('{.+?}',target["opts"])
-
-    opts = target["opts"]
-    for v_str in t_vars:
-        t_varname = re.sub(r'[{}]', '', v_str)
-        if t_varname in vars:
-            t_var = vars[t_varname]
-            print(t_varname, "is", t_var, "in config")
-            opts = opts.replace(str(v_str),str(t_var))
-    return opts
-
 # returns 2-tuple, where:
 # 0 = files affected by default config
 # 1 = files affected by .umc_override files
@@ -129,30 +120,56 @@ def get_overriden_files(all_files,config):
 
     return (all_files_trim,overrides)
 
-def get_files_to_process(src_dir,target,config,tcrit,all_files,override):
+def get_params_in_opts(opts):
+    return re.findall('{.+?}',opts)
+
+def apply_opts_params(target,uniforms):
+    t_uniforms = get_params_in_opts(target["opts"])
+
+    opts = target["opts"]
+    for u_str in t_uniforms:
+        opt_u = re.sub(r'[{}]', '', u_str)
+        
+        if opt_u in uniforms:
+            opts = opts.replace(str(u_str),str(uniforms[opt_u]))
+        else:
+            print("Fatal error: \"" + opt_u + "\" in opts doesn't match any uniforms in config:\n")
+            print("opts:", target["opts"])
+            print("uniforms (parsed from opts):", t_uniforms)
+            print("uniforms (defined in config):", uniforms)
+            quit(1)
+    return opts
+
+def prepare_files(src_dir,target,config,tcrit,all_files,override):
     to_process = []
+    files = all_files if override == None else override[0]
     
-    init = (target["opts"],all_files)
-    if override != None:
-        init = (apply_opts_params(target,config["vars"]),override[0])
+    if "uniforms" in config:
+        init = (apply_opts_params(target,config["uniforms"]),files)
+    elif override == None and len(get_params_in_opts(target["opts"])) > 0:
+        print("Fatal error: no uniforms set")
+        quit(1)
+    else:
+        init = (target["opts"],files)
+
 
     to_process.append(init)
-
+    
     if override != None:
         for overrides in override[1]:
             ov_file = os.path.join(src_dir,overrides[0])
 
-            ov = conf.get_dict_from_yaml(ov_file)
+            ov_params = conf.get_dict_from_yaml(ov_file)
 
-            if ov == None:
-                print(ov_file, "didn't read properly, falling back to default parameters...")
-                ov = config["vars"]
-            misc.extend_dict(ov,config["vars"])
+            if ov_params == None:
+                print(ov_file, "didn't read properly, falling back to config uniforms...")
+                ov_params = config["uniforms"]
+            misc.extend_dict(ov_params,config["uniforms"])
 
-            print(ov)
+            # print(ov_params)
             
-            new_opts = apply_opts_params(target,ov)
-            print(new_opts)
+            new_opts = apply_opts_params(target,ov_params)
+            print("Applied override:", ov_file)
 
             to_process.append((
                 new_opts,
@@ -206,17 +223,14 @@ def process_targets(src_dir, all_files, config):
     
     target_dir = os.path.join(src_dir, os.path.pardir)
     if ("target_dir" in config):
-        target_dir = config["target_dir"]
+        target_dir = os.path.expanduser(config["target_dir"])
     
     override = get_overriden_files(all_files,config)
     
     if override != None:
-        if not "vars" in config:
-            print("Tried to use .umc_override where no variables exist on the default config!")
+        if not "uniforms" in config:
+            print("Tried to use .umc_override where no uniforms exist on the default config!")
             quit(1)
-        for overrides in override[1]:
-            print(overrides)
-            print()
 
     enc_queue = []
     for target_key in config["targets"].keys():
@@ -245,7 +259,7 @@ def process_targets(src_dir, all_files, config):
 
         print("Filtering files for conversion according to target criteria:", str(tcrit))
         
-        to_process = get_files_to_process(src_dir,target,config,tcrit,all_files,override)
+        to_process = prepare_files(src_dir,target,config,tcrit,all_files,override)
 
         fget.copy_dirtree(src_dir,t_dir)
 
@@ -255,7 +269,7 @@ def process_targets(src_dir, all_files, config):
         enc_queue += create_queue(src_dir,t_dir,target,to_process)
 
         print()
-        
+        enc_count = len(enc_queue)
         if len(enc_queue) < 1:
             continue
 
@@ -279,5 +293,5 @@ def process_targets(src_dir, all_files, config):
     
     print()
     print("Transcode/mirror successful. Phew!")
-    print(str(copy_counter[0]) + " file(s) copied. " + str(copy_counter[1]) + " file(s) skipped.")
-    print(str(len(enc_queue)) + " file(s) transcoded.")
+    print(str(copy_counter[0]), "file(s) copied.", str(copy_counter[1]), "file(s) skipped.")
+    print(str(enc_count), "file(s) transcoded.")

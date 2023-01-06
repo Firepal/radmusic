@@ -21,8 +21,10 @@ def get_dict_from_yaml(file):
 def init_config(dir):
     file = None
     for name in conf_names:
-        file = os.path.join(dir,name)
-        if os.path.exists(file): break
+        ftest = os.path.join(dir,name)
+        if os.path.exists(ftest): 
+            file = ftest
+            break
     
     if file == None:
         print("No config file found.")
@@ -37,16 +39,16 @@ def init_config(dir):
     return config
 
 conf_defaults = {
-    "parallel": False,
-    "wav2flac": False,
     "copy_aux_files": True,
 }
 
-def create_conf_file(config):
+def create_conf_file(config, cwd = None):
     misc.extend_dict(config,conf_defaults)
+    if cwd == None:
+        cwd = os.getcwd()
 
-    fname = conf_names[0]
+    fname = os.path.abspath(os.path.join(cwd,conf_names[0]))
     file = open(fname,'w')
-    print("Writing config to " + os.path.join(os.getcwd(),fname))
+    print("Writing config to", fname)
     yaml.dump(config,file,indent=4,sort_keys=False)
     file.close()

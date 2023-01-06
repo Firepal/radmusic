@@ -1,11 +1,6 @@
 import argparse
 import os
 import time
-from threading import Thread
-try:
-    from Queue import Queue
-except ImportError:
-    from queue import Queue
 
 from . import conf, confwiz, fget, target
 
@@ -21,8 +16,7 @@ def check_for_wavs_silent(all_files):
 def check_for_wavs(all_files):
     files = fget.filter_ext(all_files,[".wav"])
 
-    if len(files) < 1:
-        return
+    if len(files) < 1: return
     
     print(files)
     conv_prompt = input("WAV file(s) detected. Would you like to convert them to FLAC to save space? ")
@@ -53,6 +47,7 @@ def init_argparse() -> argparse.ArgumentParser:
     return parser
 
 def program(cwd, args):
+    cwd = os.path.expanduser(cwd)
     config = conf.init_config(cwd)
     
     if (config == None or args.wizard):
@@ -68,8 +63,8 @@ def program(cwd, args):
     all_files = fget.get_all_files(cwd)
     print(str(len(all_files)) + " file(s)")
 
-    if config["wav2flac"]:
-        check_for_wavs(cwd)
+    # if config["wav2flac"]:
+    #     check_for_wavs(cwd)
 
     c_start = time.time()
     target.process_targets(cwd, all_files, config)
@@ -87,5 +82,3 @@ def main():
             cwd = os.path.split(cwd)[0]
     
     program(cwd,args)
-
-    input("Press Enter to quit...")

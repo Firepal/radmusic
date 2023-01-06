@@ -49,7 +49,7 @@ def copy_aux_files(all_files,exts,src,dst,count):
 
     for e in files[:]:
         if os.path.basename(e) in [".umc.yaml","umc.yaml",".umc_override"]:
-            print("Not transferring", e)
+            # print("Not transferring", e)
             files.remove(e)
     
     for file in files:
