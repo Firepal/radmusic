@@ -31,7 +31,7 @@ def init_config(dir):
         return None
     
     config = get_dict_from_yaml(file)
-    print(config)
+    # print(config)
 
     if config["targets"] == None:
         print("No targets.")

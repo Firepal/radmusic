@@ -1,6 +1,7 @@
 build/
 dist/
 source/__pycache__/
+source/gui/__pycache__/
 
 *.manifest
 *.spec

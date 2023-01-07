@@ -152,7 +152,6 @@ def prepare_files(src_dir,target,config,tcrit,all_files,override):
     else:
         init = (target["opts"],files)
 
-
     to_process.append(init)
     
     if override != None:
@@ -194,7 +193,6 @@ def create_queue(src_dir, t_dir, target: dict, to_process: list):
             )[0] + target["file_ext"]
 
             in_name = os.path.join(src_dir,file)
-
             if os.path.exists(out_name):
                 if not ("preexisting_files" in target):
                     target["preexisting_files"] = 0
@@ -224,6 +222,8 @@ def process_targets(src_dir, all_files, config):
     target_dir = os.path.join(src_dir, os.path.pardir)
     if ("target_dir" in config):
         target_dir = os.path.expanduser(config["target_dir"])
+        if not target_dir.endswith(os.path.sep):
+            target_dir = os.path.join(target_dir,os.path.sep)
     
     override = get_overriden_files(all_files,config)
     

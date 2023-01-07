@@ -46,20 +46,23 @@ def init_argparse() -> argparse.ArgumentParser:
     parser.add_argument('config_file',nargs="?")
     return parser
 
-def program(cwd, args):
+def program(cwd, args, skip_wizard = False):
     cwd = os.path.expanduser(cwd)
     config = conf.init_config(cwd)
     
-    if (config == None or args.wizard):
+
+    if config == None or args.wizard:
+        if skip_wizard:
+            print("No config")
+            return
         config = confwiz.wizard(cwd)
 
-    if config == None:
-        return
-    
+    if config == None: return
+
     if args.quiet:
         config["quiet"] = True
 
-    print("Doing one-time file discovery...")
+    print("Discovering files...")
     all_files = fget.get_all_files(cwd)
     print(str(len(all_files)) + " file(s)")
 
@@ -75,6 +78,7 @@ def program(cwd, args):
 def main():
     parser = init_argparse()
     args = parser.parse_args()
+    
     cwd = os.getcwd()
     if args.config_file:
         cwd = os.path.abspath(args.config_file)
