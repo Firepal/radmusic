@@ -45,7 +45,7 @@ def convert_queue_parallel(target,enc_queue):
         orig_len += target["preexisting_files"]
 
     proc_queue = []
-    while len(enc_queue) > 0 and len(proc_queue) >= 0:
+    while len(enc_queue) + len(proc_queue) > 0:
         for (p, infile, outfile, proc_opts) in proc_queue:
             excode = p.poll()
             if excode == None: continue
@@ -74,9 +74,10 @@ def convert_queue_parallel(target,enc_queue):
         if len(proc_queue) >= target["max_parallel_encodes"]:
             continue
 
-        enc = enc_queue.pop()
-        proc = convert_file_parallel(enc[0],enc[1],enc[2])
-        proc_queue.append((proc,enc[0],enc[1],enc[2]))
+        if len(enc_queue) > 0:
+            enc = enc_queue.pop()
+            proc = convert_file_parallel(enc[0],enc[1],enc[2])
+            proc_queue.append((proc,enc[0],enc[1],enc[2]))
 
 def convert_queue_serial(target,enc_queue):
     while len(enc_queue) > 0:
@@ -95,49 +96,67 @@ def get_key_or_none(key, iterator):
 # returns 2-tuple, where:
 # 0 = files affected by default config
 # 1 = files affected by .umc_override files
-def get_overriden_files(all_files,config):
+def get_overriden_files(all_files,src_dir,config):
     conv = fget.filter_ext(all_files,[".umc_override"])
     
     overrides = []
     all_files_trim = all_files[:]
 
-    for override_file in conv:
+    for ov_file in conv:
         files_overriden = []
+        
+        ov_dict = conf.get_dict_from_yaml(
+            os.path.join(src_dir,ov_file)
+        )
+
+        skip_dir = False
+        if not ov_dict == None:
+            skip_dir = get_key_or_none("skip_dir",[ov_dict])
+
         for file in all_files:
             if fget.path_is_parent(
-                os.path.dirname(override_file),
+                os.path.dirname(ov_file),
                 os.path.dirname(file),
                 ):
                 if not file in all_files_trim: continue
                 all_files_trim.remove(file)
-                if file == override_file: continue
+                if file == ov_file or skip_dir: continue
                 
                 files_overriden.append(file)
-        print(override_file)
-        overrides.append((override_file,files_overriden))
+        print(ov_file)
+        overrides.append((ov_file,files_overriden,ov_dict))
     
     if len(overrides) == 0: return None
 
     return (all_files_trim,overrides)
 
+
+
 def get_params_in_opts(opts):
     return re.findall('{.+?}',opts)
 
-def apply_opts_params(target,uniforms):
-    t_uniforms = get_params_in_opts(target["opts"])
+def strip_uniform_brackets(params):
+    arr = []
+    for p in params:
+        arr.append(re.sub(r'[{}]', '', p))
+    return arr
 
+def apply_opts_params(target,uniforms):
     opts = target["opts"]
+    t_uniforms = get_params_in_opts(opts)
+    t_uniforms_ub = strip_uniform_brackets(t_uniforms)
+
     for u_str in t_uniforms:
         opt_u = re.sub(r'[{}]', '', u_str)
         
         if opt_u in uniforms:
             opts = opts.replace(str(u_str),str(uniforms[opt_u]))
         else:
-            print("Fatal error: \"" + opt_u + "\" in opts doesn't match any uniforms in config:\n")
-            print("opts:", target["opts"])
+            print("Fatal error: \"" + opt_u + "\" in opts doesn't match any uniform in config:\n")
+            print("opts:", opts)
             print("uniforms (parsed from opts):", t_uniforms)
             print("uniforms (defined in config):", uniforms)
-            quit(1)
+            return
     return opts
 
 def prepare_files(src_dir,target,config,tcrit,all_files,override):
@@ -158,15 +177,13 @@ def prepare_files(src_dir,target,config,tcrit,all_files,override):
         for overrides in override[1]:
             ov_file = os.path.join(src_dir,overrides[0])
 
-            ov_params = conf.get_dict_from_yaml(ov_file)
+            ov_params = overrides[2]
 
             if ov_params == None:
                 print(ov_file, "didn't read properly, falling back to config uniforms...")
                 ov_params = config["uniforms"]
             misc.extend_dict(ov_params,config["uniforms"])
 
-            # print(ov_params)
-            
             new_opts = apply_opts_params(target,ov_params)
             print("Applied override:", ov_file)
 
@@ -202,6 +219,17 @@ def create_queue(src_dir, t_dir, target: dict, to_process: list):
     
     return enc_queue
 
+def get_target_dir(src_dir,config,target):
+    t_dir = get_key_or_none("target_dir",[target,config])
+
+    if t_dir != None:
+        t_dir = os.path.expanduser(t_dir)
+        if not t_dir.endswith(os.path.sep):
+            t_dir = os.path.join(t_dir,os.path.sep)
+    else: # use parent dir as default
+        t_dir = os.path.join(src_dir, os.path.pardir)
+    return t_dir
+
 def process_targets(src_dir, all_files, config):
     copy_counter = [0,0]
     
@@ -209,34 +237,31 @@ def process_targets(src_dir, all_files, config):
 
     if config == None:
         print("Skipped target evaluation...")
-        return 0
+        return False
 
     if len(config["targets"].keys()) == 0:
         print("No targets defined. Wanna go through the configuration wizard now?")
         print("# TODO Implement.") # funny
-        return 0
+        return False
     
     quiet = bool(get_key_or_none("quiet",[config]))
     config["quiet"] = quiet
     
-    target_dir = os.path.join(src_dir, os.path.pardir)
-    if ("target_dir" in config):
-        target_dir = os.path.expanduser(config["target_dir"])
-        if not target_dir.endswith(os.path.sep):
-            target_dir = os.path.join(target_dir,os.path.sep)
-    
-    override = get_overriden_files(all_files,config)
+    override = get_overriden_files(all_files,src_dir,config)
     
     if override != None:
-        if not "uniforms" in config:
+        if "uniforms" in override and not "uniforms" in config:
             print("Tried to use .umc_override where no uniforms exist on the default config!")
-            quit(1)
+            return False
 
     enc_queue = []
     for target_key in config["targets"].keys():
         target = config["targets"][target_key]
+        target["name"] = str(target_key)
         print()
         print("Processing target \"" + target_key + "\"")
+
+        target_dir = get_target_dir(src_dir,config,target)
         
         # assert file ext has a dot prepended
         if target["file_ext"][0] != ".":
@@ -255,7 +280,7 @@ def process_targets(src_dir, all_files, config):
         
         if tcrit == None:
             print("No file conversion filtering criteria (set \"convert_exts\" on config and/or target, e.g [\".wav\",\".flac\"])")
-            return
+            return False
 
         print("Filtering files for conversion according to target criteria:", str(tcrit))
         
@@ -295,3 +320,4 @@ def process_targets(src_dir, all_files, config):
     print("Transcode/mirror successful. Phew!")
     print(str(copy_counter[0]), "file(s) copied.", str(copy_counter[1]), "file(s) skipped.")
     print(str(enc_count), "file(s) transcoded.")
+    return True

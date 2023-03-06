@@ -4,16 +4,6 @@ import time
 
 from . import conf, confwiz, fget, target
 
-class UMC():
-    def __init__(self):
-        pass
-
-    def halt():
-        pass
-    
-    def start():
-        pass
-
 def wav2flac(files):
     for file in files:
         target.convert_file(file, os.path.splitext(file)[0] + ".flac")
@@ -55,6 +45,7 @@ def init_argparse() -> argparse.ArgumentParser:
         help="makes program less chatty")
     parser.add_argument('config_file',nargs="?")
     return parser
+
 
 def program(cwd, args, skip_wizard = False):
     cwd = os.path.expanduser(cwd)

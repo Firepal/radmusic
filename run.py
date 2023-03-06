@@ -1,3 +1,3 @@
-from source import umc
+from source import cli
 
-umc.main()
+cli.main()
