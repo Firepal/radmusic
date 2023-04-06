@@ -1,5 +1,6 @@
 import argparse
 import os
+from pathlib import Path
 import time
 
 from . import conf, confwiz, fget, target
@@ -55,10 +56,10 @@ def program(cwd, args, skip_wizard = False):
     if config == None or args.wizard:
         if skip_wizard:
             print("No config")
-            return False
+            return None
         config = confwiz.wizard(cwd)
 
-    if config == None: return False
+    if config == None: return None
 
     if args.quiet:
         config["quiet"] = True
@@ -71,11 +72,11 @@ def program(cwd, args, skip_wizard = False):
     #     check_for_wavs(cwd)
 
     c_start = time.time()
-    target.process_targets(cwd, all_files, config)
+    cli_out = target.process_targets(Path(cwd), all_files, config)
     c_end = time.time()
 
     print("Time elapsed: " + str(round(c_end-c_start)) + " seconds")
-    return True
+    return cli_out
 
 def main():
     parser = init_argparse()

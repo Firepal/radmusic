@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import filecmp
 import shutil
 from . import misc
@@ -44,7 +45,7 @@ def filter_ext(all_files,ext_array,exclude = False):
             out.append( file )
     return out
 
-def copy_aux_files(all_files,exts,src,dst,count):
+def copy_aux_files(all_files,exts,src: Path,dst: Path,count):
     files = filter_ext(all_files,exts,exclude=True)
 
     for e in files[:]:
@@ -53,31 +54,33 @@ def copy_aux_files(all_files,exts,src,dst,count):
             files.remove(e)
     
     for file in files:
-        sf = os.path.abspath(os.path.join(src,file))
-        df = os.path.abspath(os.path.join(dst,file))
+        # sf = os.path.abspath(os.path.join(src,file))
+        # df = os.path.abspath(os.path.join(dst,file))
+        file_src = src.joinpath(file).resolve()
+        file_dest = dst.joinpath(file).resolve()
         
-        if os.path.exists(df):
+        if file_dest.exists():
             # compare files to prevent unnecessary copies
-            if filecmp.cmp(sf, df, shallow=True):
+            if filecmp.cmp(file_src, file_dest, shallow=True):
                 count[1] += 1
                 continue
         
         print(end='\r')
-        st = "Copying to " + os.path.basename(dst) + ": " + os.path.basename(sf)
+        st = f"Copying to {os.path.basename(dst)}: {os.path.basename(file_src)}"
         st = misc.fit_in_one_line(st)
         print(st,end='')
 
-        shutil.copy2(sf,df)
+        shutil.copy2(file_src,file_dest)
         count[0] += 1
 
-def copy_dirtree(src,dst):
-    if not os.path.exists(dst):
-        os.mkdir(dst)
+def copy_dirtree(src: Path,dst: Path):
+    if not dst.exists():
+        dst.mkdir()
     
     for current_dir, dirs, _files in os.walk( src ):
-        full = os.path.relpath(current_dir,src)
+        full = Path(current_dir).relative_to(src)
         for dir in dirs:
-            leaf = os.path.join(full,dir)
-            mirror = os.path.join(dst,leaf)
+            leaf = full.joinpath(dir)
+            mirror = dst.joinpath(leaf)
             
             os.makedirs( mirror, exist_ok=True )

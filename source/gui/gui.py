@@ -7,9 +7,11 @@ import argparse
 import time
 import typing
 import os
-from threading import Thread
+from threading import Thread, Event
 
 from . import confwiz_gui
+
+evt = Event()
 
 #TODO: refactor umc.program to use a dict
 def get_fake_args():
@@ -20,15 +22,32 @@ def get_fake_args():
     return ns
 
 def umc_shim(cwd, btn: ttk.Button):
+    global cli_out
     btn["text"] = "Stop"
-    has_config = cli.program(cwd,get_fake_args(),True)
+    cli_out = cli.program(cwd,get_fake_args(),True)
 
     time.sleep(0.2)
 
-    if not has_config:
+    def threads_alive():
+        global cli_out
+        for t in cli_out[1]:
+            t: Thread = t
+            if t.is_alive(): return True
+        return False
+
+    if not cli_out: # No config
         confwiz_gui.main(cwd)
+    else:
+        while threads_alive():
+            if evt.is_set():
+                cli_out[0].set() # inform umc thread we want to stop
+            time.sleep(0.5)
+    
+    if cli_out[0].is_set():
+        print("Termination successful")
     
     btn["text"] = "Run"
+    evt.clear()
 
 def create_umc_thread(cwd, btn: ttk.Button):
     return Thread(target=umc_shim,args=(cwd,btn))
@@ -98,13 +117,10 @@ def main():
         nonlocal thread
         nonlocal button_run
         nonlocal bx
-        if bx["text"] == "Stop":
-            print("trying to stop")
-            return
 
         if thread != None:
             if thread.is_alive():
-                print("thread was alive",file=sys.stderr)
+                evt.set()
                 return
         
 
