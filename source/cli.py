@@ -48,7 +48,7 @@ def init_argparse() -> argparse.ArgumentParser:
     return parser
 
 
-def program(cwd, args, skip_wizard = False):
+def converter(cwd, args, skip_wizard = False):
     cwd = os.path.expanduser(cwd)
     config = conf.init_config(cwd)
     
@@ -78,6 +78,9 @@ def program(cwd, args, skip_wizard = False):
     print("Time elapsed: " + str(round(c_end-c_start)) + " seconds")
     return cli_out
 
+def transcoder_server():
+    pass
+
 def main():
     parser = init_argparse()
     args = parser.parse_args()
@@ -88,4 +91,4 @@ def main():
         if os.path.isfile(cwd):
             cwd = os.path.split(cwd)[0]
     
-    program(cwd,args)
+    converter(cwd,args)

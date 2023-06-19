@@ -3,7 +3,7 @@ import shlex
 import subprocess
 import sys
 import time
-from . import fget, misc, conf
+from . import fget, misc, conf, specials
 import re
 import yaml
 from pathlib import Path
@@ -12,13 +12,11 @@ from threading import Thread, Event
 
 ff = "ffmpeg"
 
-def get_command(in_name, out_name, opts = ""):
-    cmd = [ff, '-n', '-hide_banner', 
-            '-i', in_name]
-    cmd += shlex.split(opts)
-    cmd.append(out_name)
-
-    return cmd
+class ProgressReport:
+    def __init__(self,file: Path,encode_num: int,total_encodes: int):
+        self.file = file
+        self.encode_num = encode_num
+        self.total_encodes = total_encodes
 
 def get_percent_string(cur_len,orig_len,outfile):
     percent = 1-(cur_len/orig_len)
@@ -32,10 +30,12 @@ def get_file_string(outfile):
     return "Encoded " + outfile + "\n"
 
 class Encode:
-    def __init__(self,in_name: str, out_name: str, opts: str):
+    def __init__(self,in_name: str, out_name: str, opts: str = "", preopts: str = ""):
         self.in_name = in_name
         self.out_name = out_name
         self.opts = opts
+        if preopts == None: preopts = ""
+        self.preopts = preopts
 
 EncodeQueue = list[Encode]
 
@@ -48,20 +48,22 @@ class Converter:
         self.enc_queue = enc_queue
         self.event = event
     
-    def get_command(in_name, out_name, opts = ""):
-        cmd = [ff, '-n', '-hide_banner', 
-                '-i', in_name]
-        cmd += shlex.split(opts)
-        cmd.append(out_name)
+    def get_command(enc: Encode):
+        cmd = [ff]
+        cmd += ['-n']
+        if len(enc.preopts) > 0:
+            cmd += shlex.split(enc.preopts)
+        cmd += ['-i', str(enc.in_name)]
+        cmd += shlex.split(enc.opts)
+        cmd += [str(enc.out_name)]
 
         return cmd
     
-    def convert_file(self,in_name: str, out_name: str, opts = "", out=subprocess.DEVNULL):
+    def convert_file(self,enc, out=None):
         return subprocess.Popen(
-            Converter.get_command(in_name, out_name, opts),
-            stdout=None,
-            stderr=None
-        )
+            Converter.get_command(enc),
+            stdout=out,
+            stderr=out)
     
     def run(self): raise NotImplementedError
 
@@ -70,20 +72,23 @@ class ConverterParallel(Converter):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
     
-    def error(self,enc: Encode):
+    def error(self, p: subprocess.Popen, enc: Encode):
         print("------------")
         print(str(enc.in_name))
         print(str(enc.out_name))
         print("One of your encodes did not succeed!")
+        print(Converter.get_command(enc))
+        print(" ".join(Converter.get_command(enc)))
+        print(str(p.stdout.read()))
+        print(str(p.stderr.read()))
 
 
-        print(" ".join(Converter.get_command(enc.in_name,enc.out_name,enc.opts)))
-        if os.path.exists(enc.out_name):
-            os.remove(enc.out_name)
+        # if os.path.exists(enc.out_name):
+        #     os.remove(enc.out_name)
         print("------------")
 
     def make_proc(self,enc: Encode):
-        return Converter.convert_file(enc.in_name, enc.out_name, enc.opts)
+        return self.convert_file(enc, subprocess.DEVNULL)
 
     def run(self):
         orig_len = 0
@@ -93,17 +98,21 @@ class ConverterParallel(Converter):
         while len(self.enc_queue) + len(self.proc_queue) > 0:
             for i, (p, enc) in enumerate(self.proc_queue):
                 code = p.poll()
-                if code == None: continue
+                if code == None:
+                    continue
                 
                 if code > 0:
-                    self.error(enc)
+                    print(code)
+                    self.error(p,enc)
                     return
                 sys.stdout.flush()
 
                 self.proc_queue.remove((p, enc))
             
             if self.event.is_set():
-                proc.terminate()
+                print("Telling all the ffmpegs to shutdown gracefully...\nThis may take some time.")
+                for p, enc in self.proc_queue:
+                    p.communicate("q")
                 break
 
             if len(self.proc_queue) >= self.target["max_parallel_encodes"]:
@@ -111,6 +120,7 @@ class ConverterParallel(Converter):
 
             if len(self.enc_queue) > 0:
                 enc = self.enc_queue.pop()
+                print(enc.in_name)
                 proc = self.make_proc(enc)
                 self.proc_queue.append((proc,enc))
     
@@ -136,7 +146,8 @@ class ConverterSerial(Converter):
                 if self.proc.poll() is None: continue
             
             enc = self.enc_queue.pop()
-            self.proc = self.convert_file(enc.in_name,enc.out_name,enc.opts)
+            print(Converter.get_command(enc))
+            self.proc = self.convert_file(enc)
         
         while self.proc.poll() is None and not self.already_stopping:
             if self.check_kill(): break
@@ -188,32 +199,6 @@ def get_overriden_files(all_files,src_dir,config):
 
     return (all_files_trim,overrides)
 
-def get_params_in_opts(opts: str):
-    return re.findall('{.+?}',opts)
-
-def strip_uniform_brackets(params):
-    arr = []
-    for p in params:
-        arr.append(re.sub(r'[{}]', '', p))
-    return arr
-
-def apply_opts_params(target: dict,uniforms: dict):
-    opts = target["opts"]
-    t_uniforms = get_params_in_opts(opts)
-    t_uniforms_ub = strip_uniform_brackets(t_uniforms)
-
-    for u_str in t_uniforms:
-        opt_u = re.sub(r'[{}]', '', u_str)
-        
-        if opt_u in uniforms:
-            opts = opts.replace(str(u_str),str(uniforms[opt_u]))
-        else:
-            print("Fatal error: \"" + opt_u + "\" in opts doesn't match any uniform in config:\n")
-            print("opts:", opts)
-            print("uniforms (parsed from opts):", t_uniforms)
-            print("uniforms (defined in config):", uniforms)
-            return
-    return opts
 
 class Target:
     target_dict: dict
@@ -238,7 +223,6 @@ class Target:
         return (self.target_dict,self.files)
         
 
-# creates target tuples and returns array
 def prepare_files(
         src_dir: Path, 
         target_dir: Path, 
@@ -250,15 +234,16 @@ def prepare_files(
         enc_queue: EncodeQueue):
     to_process: list[Target] = []
     files = all_files if override == None else override[0]
-    
+    macros = get_key_or_none("macros",[config])
+
     if "uniforms" in config:
-        init = Target(apply_opts_params(target,config["uniforms"]),files)
-    elif override == None and len(get_params_in_opts(target["opts"])) > 0:
+        init = Target(specials.apply_opts_params(target["opts"],config["uniforms"],macros),files)
+    elif override == None and len(specials.get_uniforms(target["opts"])) > 0:
         print("Fatal error: no uniforms set")
         quit(1)
     else:
         init = Target(target["opts"],files)
-
+    print(init.target_dict)
     to_process.append(init)
     
     overrides_applied: list[Path] = []
@@ -273,7 +258,8 @@ def prepare_files(
                 ov_params = config["uniforms"]
             misc.extend_dict(ov_params,config["uniforms"])
 
-            new_opts = apply_opts_params(target,ov_params)
+            new_opts = specials.apply_opts_params(target["opts"],ov_params,macros)
+            print(new_opts)
             overrides_applied.append(Path(ov_file).relative_to(src_dir).parent)
             
             to_process.append(Target(
@@ -291,9 +277,6 @@ def prepare_files(
 
     for opts, files in [target.as_tuple() for target in to_process]:
         for file in files:
-            # out_name = os.path.splitext(
-            #     os.path.join(target_dir,file)
-            # )[0] + target["file_ext"]
             out_name = target_dir.joinpath(file).with_suffix(target["file_ext"])
 
             in_name = src_dir.joinpath(file)
@@ -302,7 +285,7 @@ def prepare_files(
                     target["preexisting_files"] = 0
                 target["preexisting_files"] += 1
             else:
-                enc_queue.append(Encode(in_name,out_name,opts))
+                enc_queue.append(Encode(in_name,out_name,opts,get_key_or_none("preopts",[target])))
 
 def get_target_dir(src_dir,config,target):
     target_dir = get_key_or_none("target_dir",[target,config])
@@ -333,7 +316,7 @@ def process_targets(src_dir: Path, all_files: list, config: dict):
             print("Tried to use .umc_override where no default uniforms exist in the config!")
             return
     
-    threads: list[Thread] = []
+    threads: list[tuple[Thread,str]] = []
     event = Event()
     enc_queue = EncodeQueue()
     
@@ -366,7 +349,7 @@ def process_targets(src_dir: Path, all_files: list, config: dict):
         
         fget.copy_dirtree(src_dir,target_dir)
 
-        if config["copy_aux_files"] == True:
+        if get_key_or_none("copy_aux_files",[target,config]) == True:
             fget.copy_aux_files(all_files,tcrit,src_dir,target_dir,copy_counter)
         
         enc_count = len(enc_queue)
@@ -393,17 +376,24 @@ def process_targets(src_dir: Path, all_files: list, config: dict):
             converter = ConverterSerial(*conv_args)
         
         t = Thread(target=converter.run)
-        t.start()
-        threads.append(t)
+        threads.append((t,target_key))
     
-    while len(threads) > 0:
-        for i, thread in enumerate(threads):
-            if not thread.is_alive():
-                threads.pop(i)
+    # Run target threads sequentially
+    def worker():
+        t = None
+        for th in threads:
+            if t == None:
+                new_thread = th
+                print(f"Running thread for {new_thread[1]}")
+                t = new_thread[0]
+                t.start()
+                continue
+            
+            if not t.is_alive():
+                t = None
+        print("All targets done.")
     
-    print(enc_queue)
+    worker_thread = Thread(target=worker)
+    worker_thread.start()
     
-    print("Transcode/mirror successful. Phew!")
-    print(str(copy_counter[0]), "file(s) copied.", str(copy_counter[1]), "file(s) skipped.")
-    print(str(enc_count), "file(s) transcoded.")
     return (event,threads)

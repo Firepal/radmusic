@@ -2,6 +2,7 @@ import argparse
 import os
 import time
 from threading import Thread
+from pathlib import Path
 
 from . import conf, confwiz, fget, target
 
@@ -10,11 +11,11 @@ class NoConfigException(Exception): pass
 
 class UMC():
     config: dict = None
-    working_dir: str = None
+    working_dir: Path = None
 
     __thread: Thread = None
     __halted: bool = False
-    def __init__(self,wd: str):
+    def __init__(self,wd: Path):
         if wd != None:
             self.working_dir = wd
 
@@ -32,6 +33,9 @@ class UMC():
         return self.__thread.is_alive()
 
     def start(self):
+        if self.is_running():
+            raise Exception("Already running")
+        
         if self.working_dir == None:
             raise Exception("aaaa no working dir")
 
@@ -39,9 +43,6 @@ class UMC():
             c = self.__load_conf(self.working_dir)
             if c == None:
                 raise NoConfigException("No config loaded")
-        
-        if self.is_running():
-            raise Exception("Already running")
         
         target.process_targets(
                     src_dir=self.working_dir,

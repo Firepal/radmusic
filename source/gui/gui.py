@@ -2,11 +2,12 @@ from tkinter import *
 from tkinter.filedialog import *
 from tkinter import ttk
 import sys
-from .. import cli
+from source import cli
 import argparse
 import time
 import typing
 import os
+from pathlib import Path
 from threading import Thread, Event
 
 from . import confwiz_gui
@@ -24,27 +25,29 @@ def get_fake_args():
 def umc_shim(cwd, btn: ttk.Button):
     global cli_out
     btn["text"] = "Stop"
-    cli_out = cli.program(cwd,get_fake_args(),True)
+    cli_out = cli.converter(Path(cwd),get_fake_args(),True)
 
     time.sleep(0.2)
 
     def threads_alive():
         global cli_out
         for t in cli_out[1]:
-            t: Thread = t
-            if t.is_alive(): return True
+            t: tuple[Thread,str] = t
+            if t[0].is_alive(): return True
         return False
 
     if not cli_out: # No config
-        confwiz_gui.main(cwd)
+        cwg = confwiz_gui.ConfwizGUI(cwd)
+        cwg.mainloop()
+        if cwg.preset == None: return
     else:
         while threads_alive():
             if evt.is_set():
                 cli_out[0].set() # inform umc thread we want to stop
-            time.sleep(0.5)
+            # time.sleep(0.1)
     
-    if cli_out[0].is_set():
-        print("Termination successful")
+        if cli_out[0].is_set():
+            print("Termination successful")
     
     btn["text"] = "Run"
     evt.clear()
@@ -78,6 +81,14 @@ def main():
 
     root = Tk()
     root.title("umc")
+    window_width = 500
+    window_height = 500
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+
+    x = int((screen_width/2) - (window_width/2))
+    y = int((screen_height/2) - (window_height/2))
+    root.geometry(f"+{x}+{y}")
 
     bx: Listbox = None
 
@@ -107,9 +118,6 @@ def main():
         entry.insert(0,dir)
     ttk.Button(dirframe, text="Pick...", command=pick).grid(column=0, row=0, sticky=W)
 
-    txtbox = Text(root,insertwidth=0,width=80,font=("Courier", 9),bg="#111",fg="white")
-    txtbox.bind("<Key>", lambda x: "break")
-    txtbox.grid(column=1, row=0, sticky=E+W+N+S)
     
     button_run: ttk.Button = None
     thread: Thread = None
@@ -123,10 +131,6 @@ def main():
                 evt.set()
                 return
         
-
-        if len(txtbox.get("1.0", END)) > 0:
-            txtbox.delete("0.0",END)
-            txtbox.update()
         d = entry.get()
         
         if len(d) == 0: return
@@ -171,19 +175,8 @@ def main():
     
     bx.bind('<<ListboxSelect>>', onselect)
     
-    class TxtboxStdout(typing.TextIO):
-        def write(self,str):
-            txtbox.insert("end", str)
-            txtbox.see("end")
-
-        def flush(self):
-            super().flush()
-            txtbox.update()
-    
-    sys.stdout = TxtboxStdout()
     print("Ready.")
     
-    txtbox.grid_configure(padx=5, pady=5)
     for child in dirframe.winfo_children():
         if child == entry: pass
         child.grid_configure(padx=5, pady=5)
