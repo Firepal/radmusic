@@ -43,7 +43,7 @@ class Converter:
     target: dict
     enc_queue: EncodeQueue
     event: Event
-    def __init__(self, target, enc_queue, event):
+    def __init__(self, target, enc_queue, event = Event()):
         self.target = target
         self.enc_queue = enc_queue
         self.event = event
