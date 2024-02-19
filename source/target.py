@@ -3,6 +3,7 @@ import shlex
 import subprocess
 import sys
 import time
+import math
 from . import fget, misc, conf, specials
 import re
 import yaml
@@ -11,6 +12,15 @@ import signal
 from threading import Thread, Event
 
 ff = "ffmpeg"
+
+def smoothstep(edge0, edge1, x):
+    # Scale, and clamp x to 0..1 range
+    x = max(0.0, min((x - edge0) / (edge1 - edge0), 1.0))
+    # Evaluate polynomial
+    return x * x * (3 - 2 * x)
+
+def lerp(a: float, b: float, t: float):
+    return (1 - t) * a + t * b
 
 class ProgressReport:
     def __init__(self,file: Path,encode_num: int,total_encodes: int):
@@ -71,6 +81,15 @@ class ConverterParallel(Converter):
     proc_queue: list[tuple[subprocess.Popen,Encode]] = []
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
+        
+        # sort by size to process smallest files first
+
+        # this is a shim for the fact that 
+        # the threaded performance starts sucking when umc processes bigger files with many threads
+
+        # we need to find a way to only process 2 big files at once
+        # to let more threads work on smaller files
+        # print(self.enc_queue.sort(key=lambda x: os.path.getsize(x.in_name), reverse=True))
     
     def error(self, p: subprocess.Popen, enc: Encode):
         print("------------")
@@ -94,35 +113,74 @@ class ConverterParallel(Converter):
         orig_len = 0
         if ("preexisting_files" in self.target):
             orig_len += self.target["preexisting_files"]
-
+        
+        max_total_par = self.target["max_parallel_encodes"]
+        parallel_cap = 1
+        
+        proc_time_lerp = 3.0
+        
+        start = time.time()
+        print("hello")
         while len(self.enc_queue) + len(self.proc_queue) > 0:
-            for i, (p, enc) in enumerate(self.proc_queue):
+            for i, (p, enc, proc_start) in enumerate(self.proc_queue):
                 code = p.poll()
-                if code == None:
-                    continue
-                
+                if code == None: continue
                 if code > 0:
                     print(code)
                     self.error(p,enc)
                     return
                 sys.stdout.flush()
 
-                self.proc_queue.remove((p, enc))
+                proc_time = time.time() - proc_start
+                proc_time_lerp = lerp(proc_time_lerp, proc_time, 0.03)
+                
+                # we heuristically cap the number of simulateneous conversions based on speed
+                # to make sure that I/O remains smooth and we don't destroy the CPU with a bunch of work
+                
+                sec = get_key_or_none("thread_speed",[self.target])
+                if sec == None: sec = 6.0
+
+                par = math.ceil(smoothstep(sec,0,proc_time) * max_total_par)
+                
+                old_pcap = parallel_cap
+                parallel_cap = lerp(par,parallel_cap,0.9)
+                parallel_cap = min(par,parallel_cap)
+                parallel_cap = max(1,parallel_cap)
+                
+                this_encode_name = Path(enc.in_name).name
+                self.proc_queue.remove((p, enc, proc_start))
+                
+                if round(old_pcap) != round(parallel_cap):
+                    total_len = len(self.enc_queue) + len(self.proc_queue)
+                    min_left = math.ceil((total_len * proc_time_lerp) / 60)
+                    
+                    threading_info = this_encode_name + " - "
+                    threading_info += "{:.1f}s - ".format(proc_time)
+                    threading_info += "Thread count now = {} - ".format(round(parallel_cap))
+                    threading_info += "{} files left, ".format(total_len)
+                    threading_info += "{} min left ".format(min_left)                  
+                    print(threading_info)
+                
             
             if self.event.is_set():
                 print("Telling all the ffmpegs to shutdown gracefully...\nThis may take some time.")
-                for p, enc in self.proc_queue:
+                for p, enc, proc_start in self.proc_queue:
                     p.communicate("q")
                 break
-
-            if len(self.proc_queue) >= self.target["max_parallel_encodes"]:
+            
+            if len(self.proc_queue) >= round(parallel_cap):
                 continue
 
             if len(self.enc_queue) > 0:
                 enc = self.enc_queue.pop()
-                print(enc.in_name)
                 proc = self.make_proc(enc)
-                self.proc_queue.append((proc,enc))
+                proc_start = time.time()
+                print(enc.in_name)
+                self.proc_queue.append((proc,enc,proc_start))
+        
+        end = time.time()
+        print("are we done? i think we're done")
+        print(round(end - start), "seconds")
     
 
 class ConverterSerial(Converter):
@@ -336,6 +394,7 @@ def process_targets(src_dir: Path, all_files: list, config: dict):
         if parallel_encs == None: parallel_encs = 1
         parallel_encs = min(max(parallel_encs,1),12) # TODO: get actual CPU count
         target["max_parallel_encodes"] = parallel_encs
+        target["thread_speed"] = get_key_or_none("thread_speed",[config])
 
         tcrit = get_key_or_none("convert_exts",[target,config])
         

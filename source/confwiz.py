@@ -1,7 +1,7 @@
 import os
 from . import conf
 
-DEFAULT_PARALLEL_ENCODES = 4
+DEFAULT_PARALLEL_ENCODES = 8
 
 def default_audio_exts(exclude: list[str]):
     exts = [
@@ -13,10 +13,27 @@ def default_audio_exts(exclude: list[str]):
         ".m4a",
         ".opus",
     ]
+    
+    if exclude == None:
+        exclude = []
 
     return [ext for ext in exts if ext not in exclude]
 
 # Presets
+
+def wav2flac_preset(name):
+    return {
+        "max_parallel_encodes": DEFAULT_PARALLEL_ENCODES,
+
+        "convert_exts": default_audio_exts([]),
+
+        "targets": {
+            name+"_flac": {
+            "opts": "-ar 44100",
+            "file_ext": "flac"
+            },
+        }
+    }
 
 def opus_preset(name):
     return {
@@ -216,6 +233,7 @@ presets = [
     ("Convert music to Opus and MP3", opusmp3_preset),
     ("Convert music to AAC and MP3", aacmp3_preset),
     ("Convert music to AAC and Opus", aacopus_preset),
+    ("Convert music to FLAC", wav2flac_preset),
     None,
     ("Convert videos to AV1 (720p)", av1_preset),
     ("Convert videos for 3DS", n3ds_preset),

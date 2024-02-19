@@ -29,11 +29,15 @@ def check_for_wavs(cwd,all_files):
     for i, f in enumerate(all_files):
         if Path(f).suffix.lower == ".wav" and not Path(f).with_suffix(".flac").exists():
             all_files[i] = str(Path(all_files[i]).with_suffix(".flac"))
+    
+    # temporary encode queue 
     enc_queue = [target.Encode(file,file.with_suffix(".flac"),opts="-map_metadata 0") for file in files if not Path(file).with_suffix(".flac").exists()]
     
     print(enc_queue)
     # print(Path(files[0]).with_suffix(".flac"))
     # print(Path(files[0]).with_suffix(".flac").exists())
+    
+    
 
     conv = target.ConverterParallel(target={"max_parallel_encodes": 3},enc_queue=enc_queue)
     conv.run()
@@ -65,6 +69,7 @@ def converter(cwd, args, skip_wizard = False):
 
     print("Discovering files...")
     all_files = fget.get_all_files(cwd)
+    
     print(str(len(all_files)) + " file(s)")
     
 
@@ -83,6 +88,8 @@ def converter(cwd, args, skip_wizard = False):
         if config["wav2flac"]:
             check_for_wavs(cwd,all_files)
             all_files = fget.get_all_files(cwd)
+    
+    print(all_files[0])
 
     c_start = time.time()
     cli_out = target.process_targets(Path(cwd), all_files, config)
